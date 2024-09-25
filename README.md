@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This repository contains the codebase for the paper "Hand Gesture Recognition with Switching State Based on Surface Electromyography through 3D Self-Organizing Mapping Network." The project focuses on hand gesture recognition using surface electromyography (sEMG) data and employs a 3D-sEMG-SOM (3D Self-Organizing Map) for classification. The project also includes two comparative methods: Long Short-Term Memory (LSTM) networks and Wavelet Neural Networks (WNN).
+This repository contains the codebase for the paper "Hand Gesture Recognition with Switching State Based on Surface Electromyography through 3D Self-Organizing Mapping Network." The project focuses on hand gesture recognition using surface electromyography (sEMG) data and employs a 3D-sEMG-SOM (3D Self-Organizing Map) for classification. The project also includes four comparative methods: Support Vector Machine (SVM), Linear Discriminant Analysis (LDA), Long Short-Term Memory (LSTM) networks and Wavelet Neural Networks (WNN).
 
 ## Table of Contents
 
@@ -32,6 +32,7 @@ MainCode/
 ├── 3D_sEMG_SOM.py               # Implementation of the 3D-sEMG-SOM algorithm
 ├── Compare_LSTM.py              # Implementation of the LSTM algorithm
 ├── Compare_WNN.py               # Implementation of the WNN algorithm
+├── Compare_ML.py                # Implementation of the SVM and LDA algorithm
 ├── feature_extraction.py        # Feature extraction module
 └── util_functions.py            # Utility functions module
 ```
