@@ -13,12 +13,14 @@ Copyright: Copyright (c) 2024 Yahan DUAN
 
 Revision History:
     2024-06-13 - Yahan DUAN - Initial version
+    2024-09-13 - Yahan DUAN - Update the net
 """
 
 import os
 import time
 import numpy as np
 import pandas as pd
+import pywt
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -38,22 +40,50 @@ FEATURE_COL = [
 ]
 
 
+class WaveletTransform(nn.Module):
+    def __init__(self, wavelet='db1', level=1):
+        super(WaveletTransform, self).__init__()
+        self.wavelet = wavelet
+        self.level = level
+
+    def forward(self, x):
+        batch_size, features = x.shape
+        transformed_list = []
+
+        for i in range(batch_size):
+            # 转换为 numpy 数组进行小波变换
+            coeffs = pywt.wavedec(x[i].cpu().numpy(), wavelet=self.wavelet, level=self.level)
+            coeffs_flattened = np.concatenate([c.flatten() for c in coeffs], axis=0)
+            transformed_list.append(coeffs_flattened)
+
+        # 将列表转换为张量
+        max_length = max(len(t) for t in transformed_list)  # 获取最大的特征维度
+        padded_transformed = np.zeros((batch_size, max_length), dtype=np.float32)
+
+        for i, t in enumerate(transformed_list):
+            padded_transformed[i, :len(t)] = t  # 将变换结果填充到张量中
+
+        return torch.tensor(padded_transformed)
+
 class WaveletNet(nn.Module):
     def __init__(self, input_dim, output_dim):
         super(WaveletNet, self).__init__()
+        self.wavelet_transform = WaveletTransform(wavelet='db1', level=1)
+        # 这里的 input_dim 需要设置为小波变换后的特征维度
         self.fc1 = nn.Linear(input_dim, 256)
         self.relu = nn.ReLU()
         self.fc2 = nn.Linear(256, 512)
         self.fc3 = nn.Linear(512, output_dim)
 
     def forward(self, x):
+        x = self.wavelet_transform(x)
+        x = x.view(x.size(0), -1)  # 展平以适应全连接层
         x = self.fc1(x)
         x = self.relu(x)
         x = self.fc2(x)
         x = self.relu(x)
         x = self.fc3(x)
         return x
-
 
 def feature_normalization(data):
     """
@@ -131,7 +161,7 @@ def feature_extract(input_data):
     dwt_feature = feature_ex.DWT()
     # dft_feature = feature_ex.DFT()
 
-    return np.hstack([rms_feature, zc_feature])
+    return np.hstack([mav_feature, rms_feature, zc_feature, ssc_feature])
 
 
 def read_csv(root_diretory, motion_num):
@@ -245,7 +275,8 @@ def main():
     # 读取并处理数据
     data_start_time = time.time()
     train_set, label, emg_df = read_csv(ROOT_DIR, MOTION_NUM)
-    # train_set = normalize(train_set, norm='l2')
+    train_set = normalize(train_set, norm='l2')
+    train_set = feature_normalization(train_set)
     data_end_time = time.time()
     print(f"数据读取和处理时间: {data_end_time - data_start_time:.2f}秒")
 
@@ -253,6 +284,7 @@ def main():
     kfold_start_time = time.time()
     kf = KFold(n_splits=5, shuffle=True, random_state=0)
     accuracy_list = []
+    prediction_time_list = []  # 存储每次预测阶段的时间
 
     for fold, (train_index, test_index) in enumerate(kf.split(train_set), 1):
         fold_start_time = time.time()
@@ -266,9 +298,9 @@ def main():
         y_test = torch.tensor(test_y, dtype=torch.long)
 
         # 创建和训练小波神经网络模型
-        model = WaveletNet(input_dim=16, output_dim=14)
+        model = WaveletNet(input_dim=32, output_dim=14)
         criterion = nn.CrossEntropyLoss()
-        optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+        optimizer = optim.SGD(model.parameters(), lr=0.05, momentum=0.9)
         epochs = 100
 
         for epoch in range(epochs):
@@ -284,6 +316,8 @@ def main():
             print(
                 f'Fold {fold} Epoch [{epoch + 1}/{epochs}], Loss: {loss.item():.4f}, Epoch Time: {epoch_end_time - epoch_start_time:.2f}秒')
 
+        # 预测阶段时间计算
+        prediction_start_time = time.time()
         with torch.no_grad():
             outputs = model(X_test)
             _, predicted = torch.max(outputs.data, 1)
@@ -291,18 +325,25 @@ def main():
             correct = (predicted == y_test).sum().item()
             accuracy = correct / total
             accuracy_list.append(accuracy)
+        prediction_end_time = time.time()
+        prediction_time = prediction_end_time - prediction_start_time
+        prediction_time_list.append(prediction_time)  # 记录预测时间
 
-            fold_end_time = time.time()
-            print(f'Fold {fold} Accuracy: {accuracy:.4f}, Fold Time: {fold_end_time - fold_start_time:.2f}秒')
+        fold_end_time = time.time()
+        print(
+            f'Fold {fold} Accuracy: {accuracy:.4f}, Fold Time: {fold_end_time - fold_start_time:.2f}秒, Prediction Time: {prediction_time:.2f}秒')
 
     kfold_end_time = time.time()
     avg_accuracy = np.mean(accuracy_list)
-    print(f'Average Accuracy: {avg_accuracy:.4f}')
-    print(f"K折交叉验证时间: {kfold_end_time - kfold_start_time:.2f}秒")
+    avg_prediction_time = np.mean(prediction_time_list)  # 计算平均预测时间
 
-    # 记录总结束时间
-    total_end_time = time.time()
-    print(f"总运行时间: {total_end_time - total_start_time:.2f}秒")
+    print(f'Average Accuracy: {avg_accuracy*100:.2f}%')
+    print(f'Average Prediction Time: {avg_prediction_time*1000:.2f}ms')  # 输出平均预测时间
+    # print(f"K折交叉验证时间: {kfold_end_time - kfold_start_time:.2f}秒")
+    #
+    # # 记录总结束时间
+    # total_end_time = time.time()
+    # print(f"总运行时间: {total_end_time - total_start_time:.2f}秒")
 
 
 if __name__ == "__main__":
